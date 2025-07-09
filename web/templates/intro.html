@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login | Code Similarity Detector</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='cool.css') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css"/>
+</head>
+<body>
+  <header class="navbar">
+    <div class="logo">CodeSimDetect</div>
+    <nav>
+      <ul class="nav-links">
+        <li><a href="#home" class="nav-item">Home</a></li>
+        <li><a href="#features" class="nav-item">Features</a></li>
+        <li><a href="#about" class="nav-item">About</a></li>
+        <li><a href="#contact" class="nav-item">Contact</a></li>
+        <li><a href="/login" class="sign-btn">Log In</a></li> <!-- Changed here -->
+      </ul>
+    </nav>
+  </header>
+
+  <div id="home-content" class="section-content">
+    <h2>Home</h2>
+   
+    <p>Welcome to CodeSim Detect – your trusted solution for intelligent code similarity detection.
+    <p>We aim to simplify and strengthen academic and development environments by providing an efficient way to detect similar code structures across multiple submissions.
+        
+        Our platform is designed to assist:
+        </p>
+        <p> 🎓 Educators – to ensure academic integrity and discourage plagiarism in student assignments.</p><br>
+        <p> 🏢 Organizations – to validate the originality of internal codebases and protect intellectual property.</p><br>
+        <p>👨‍💻 Developers & Teams – to collaborate transparently and avoid accidental code duplication.</p><br>
+        <p>With a user-friendly interface and powerful backend algorithms, CodeSim Detect empowers users to analyze, compare, and prevent code duplication effectively.</p><br>
+        <p>“Detect. Compare. Prevent.” – That’s not just our motto, it’s our mission.</p>
+       
+        
+       
+        
+        
+        
+        
+    <!-- Add more home content here -->
+  </div>
+  
+  <div id="features-content" class="section-content">
+    <h2>Features</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <i class="fas fa-search"></i>
+        <h3>Advanced Detection</h3>
+        <p>Our algorithm detects similarities even when code has been modified or variables renamed.</p>
+      </div>
+      <div class="feature-card">
+        <i class="fas fa-chart-bar"></i>
+        <h3>Detailed Reports</h3>
+        <p>Get comprehensive reports with similarity percentages and highlighted matching sections.</p>
+      </div>
+      <div class="feature-card">
+        <i class="fas fa-shield-alt"></i>
+        <h3>Plagiarism Prevention</h3>
+        <p>Help maintain academic integrity and encourage original work.</p>
+      </div>
+    </div>
+  </div>
+  
+  <div id="about-content" class="section-content" style="text-align: center;">
+    <h2>About Us</h2>
+    <p>-This is our college project developed as a part of academic learning and innovation.</p>
+  
+    <p>-We are students of Yeshwantrao Chavan College of Engineering (YCCE), Nagpur, working collaboratively to build useful and real-world applications.</p>
+  
+    <h2>Developers:</h2>
+  
+    <div class="team-list" style="margin-top: 10px;">
+      <div>KRUTIKA FUNDE</div>
+      <div>RAJ DHOBALE</div>
+      <div>ROHIT S GAJBHIYE</div>
+      <div>SACHIN N BISEN</div>
+      <div>PRITAM CHAUDHARI</div>
+      <div>PRATHMESH N GHORMADE</div>
+    </div>
+  </div>
+  
+  
+  
+  <div id="contact-content" class="section-content">
+    <h2>Contact Us</h2>
+    <div class="contact-info">
+      <p><i class="fas fa-envelope"></i> Email: support@codesimdetect.com</p>
+      <p><i class="fas fa-phone"></i> Phone: (123) 456-7890</p>
+      <p><i class="fas fa-map-marker-alt"></i> Address: 123 Tech Avenue, Coding City</p>
+    </div>
+    <form class="contact-form">
+      <input type="text" placeholder="Your Name" required>
+      <input type="email" placeholder="Your Email" required>
+      <textarea placeholder="Your Message" rows="4" required></textarea>
+      <button type="submit">Send Message</button>
+    </form>
+  </div>
+  
+  <div class="quotes">
+    <h2>DETECT</h2>
+    <h2>COMPARE</h2>
+    <h2>PREVENT</h2>
+  </div>
+
+  <div class="tagline">
+    <h4>Detect. Compare. Prevent.” – That’s not just our motto, it’s our mission.</h4>
+  </div>
+  
+  <div class="container" id="container">
+    <!-- Sign Up Form -->
+    <div class="form-container sign-up">
+      <form method="POST" action="/signup">
+        <h1>Create Account</h1>
+        <input type="text" name="name" placeholder="Name" required />
+        <input type="email" name="email" placeholder="Email" required />
+        <input type="password" name="password" placeholder="Password" required />
+        <button type="submit">Sign Up</button>
+      </form>
+    </div>
+    
+    <!-- Sign In Form -->
+    <div class="form-container sign-in">
+      <form method="POST" action="/login">
+        <h1>Sign In</h1>
+        {% if error %}
+          <p style="color: red;">{{ error }}</p>
+        {% endif %}
+        <input type="email" name="email" placeholder="Email" required />
+        <input type="password" name="password" placeholder="Password" required />
+        <a href="/forgot-password">Forgot your password?</a>
+        <button type="submit">Sign In</button>
+      </form>
+    </div>
+    
+    <!-- Toggle Panels -->
+    <div class="toggle-container">
+      <div class="toggle">
+        <div class="toggle-panel toggle-left">
+          <h1>Welcome Back!</h1>
+          <p>To keep connected, please login with your details</p>
+          <button class="hidden" id="signIn">Sign In</button>
+        </div>
+        <div class="toggle-panel toggle-right">
+          <h1>Hello, Friend!</h1>
+          <p>Enter your details and start your journey with us</p>
+          <button class="hidden" id="signUp">Sign Up</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const container = document.getElementById('container');
+      const signUpButton = document.getElementById('signUp');
+      const signInButton = document.getElementById('signIn');
+      const navLinks = document.querySelectorAll('.nav-item');
+      
+      // Toggle between sign up and sign in forms
+      if (signUpButton) {
+        signUpButton.addEventListener('click', function() {
+          container.classList.add('active');
+        });
+      }
+      
+      if (signInButton) {
+        signInButton.addEventListener('click', function() {
+          container.classList.remove('active');
+        });
+      }
+      
+      // Make the nav links responsive
+      navLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+          e.preventDefault();
+          const clickedSection = this.getAttribute('href').substring(1);
+          
+          document.querySelectorAll('.section-content.active').forEach(section => {
+            section.classList.remove('active');
+          });
+          
+          const sectionContent = document.getElementById(`${clickedSection}-content`);
+          if (sectionContent) {
+            sectionContent.classList.add('active');
+          }
+        });
+      });
+
+      // Removed the sign-in button toggle functionality
+      
+      document.addEventListener('click', function(e) {
+        if (!e.target.closest('.nav-item') && 
+            !e.target.closest('.section-content') && 
+            !e.target.closest('.container')) {
+          
+          document.querySelectorAll('.section-content.active').forEach(section => {
+            section.classList.remove('active');
+          });
+        }
+      });
+    });
+  </script>
+
+  <audio id="launchSound" autoplay>
+    <source src="{{ url_for('static', filename='sounds/launch.mp3') }}" type="audio/mpeg">
+    Your browser does not support the audio element.
+  </audio>
+</body>
+</html>
