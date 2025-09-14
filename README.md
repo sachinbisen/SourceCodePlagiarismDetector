@@ -225,5 +225,5 @@ This project is licensed under the [MIT License].
 
 ---
 
-> 💡 *Empowering developers and educators to ensure code integrity with intelligent comparison tools.*
+> 💡 *Empowering developers and educators to ensure code integrity with intelligent comparison tools and techniques.*
 

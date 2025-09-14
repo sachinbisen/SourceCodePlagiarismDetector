@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Bulk Analysis Report</title>
+    <title>Enhanced Bulk Analysis Report</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <style>
         body {
             background-color: #1e1e2f;
@@ -32,12 +33,34 @@
             background-color: #323850;
         }
         .cluster-card {
+            cursor: pointer;
             transition: all 0.2s;
         }
         .cluster-card:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            box-shadow: 0 5px 15px rgba(71, 160, 255, 0.3);
         }
+        .standalone-cluster {
+            background-color: #3b3f51;
+            opacity: 0.8;
+        }
+        .cluster-files {
+            display: none;
+            margin-top: 10px;
+            padding: 15px;
+            background-color: #323850;
+            border-radius: 5px;
+        }
+        .cluster-files.show {
+            display: block;
+        }
+        .similarity-badge {
+            font-size: 0.8em;
+            margin: 2px;
+        }
+        .score-high { background-color: #dc3545; }
+        .score-medium { background-color: #fd7e14; }
+        .score-low { background-color: #28a745; }
         .btn-outline-primary {
             border-color: #47a0ff;
             color: #47a0ff;
@@ -53,106 +76,223 @@
         .logo-container img {
             height: 70px;
         }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #47a0ff, #5b6bc0);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
-<div class="container">
+<div class="container-fluid">
     <!-- Logo -->
     <div class="logo-container">
         <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
     </div>
 
-    <div class="card shadow">
+    <!-- Enhanced Statistics Dashboard -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-number">{{ report.total_files }}</div>
+            <div>Files Analyzed</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ report.clusters | length }}</div>
+            <div>Clusters Found</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ (report.threshold * 100) | round(0) }}%</div>
+            <div>Similarity Threshold</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ report.comparisons | length }}</div>
+            <div>Total Comparisons</div>
+        </div>
+    </div>
+
+    <!-- Enhanced Clusters Section -->
+    <div class="card shadow mb-4">
         <div class="card-header">
-            <h2 class="mb-0 text-center">Bulk Analysis Report</h2>
+            <h2 class="mb-0">📁 File Clusters & Similarity Groups</h2>
+            <small>Click on any cluster to expand and view files</small>
         </div>
         <div class="card-body">
-            <div class="row mb-4">
-                <div class="col-md-6">
-                    <p><strong>Report ID:</strong> {{ report_id }}</p>
-                    <p><strong>Date:</strong> {{ report.timestamp }}</p>
-                </div>
-                <div class="col-md-6">
-                    <p><strong>Threshold:</strong> {{ (report.threshold * 100) | round(2) }}%</p>
-                    <p><strong>Total Files Analyzed:</strong> {{ report.total_files }}</p>
-                </div>
-            </div>
-            
-            <h3>Detected Clusters</h3>
             {% if report.clusters %}
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>Cluster ID</th>
-                            <th>Files in Cluster</th>
-                            <th>Size</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for cluster in report.clusters %}
-                        <tr class="cluster-card">
-                            <td>{{ loop.index }}</td>
-                            <td>
-                                {% for file in cluster %}
-                                {{ file }}{% if not loop.last %}, {% endif %}
-                                {% endfor %}
-                            </td>
-                            <td>{{ cluster | length }} files</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            
-            <h3>Detailed Comparisons</h3>
             {% for cluster in report.clusters %}
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h4 class="mb-0">Cluster {{ loop.index }} ({{ cluster | length }} files)</h4>
-                </div>
+            <div class="card mb-3 cluster-card {{ 'standalone-cluster' if cluster.files | length == 1 else '' }}" 
+                 onclick="toggleCluster({{ cluster.cluster_id }})">
                 <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>File 1</th>
-                                    <th>File 2</th>
-                                    <th>Similarity Score</th>
-                                    <th>Details</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for comparison in report.comparisons %}
-                                {% if comparison.file1 in cluster and comparison.file2 in cluster and comparison.score >= report.threshold %}
-                                <tr>
-                                    <td>{{ comparison.file1 }}</td>
-                                    <td>{{ comparison.file2 }}</td>
-                                    <td>{{ (comparison.score * 100) | round(2) }}%</td>
-                                    <td>
-                                        <a href="{{ url_for('report_detail', report_id=report_id, file1=comparison.file1, file2=comparison.file2) }}" 
-                                           class="btn btn-sm btn-outline-primary">View Details</a>
-                                    </td>
-                                </tr>
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h5 class="mb-1">
+                                {% if cluster.files | length == 1 %}
+                                    🔹 Standalone File
+                                {% else %}
+                                    🔗 Cluster {{ cluster.cluster_id }}
                                 {% endif %}
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                                <span class="badge bg-info">{{ cluster.files | length }} file{{ 's' if cluster.files | length != 1 else '' }}</span>
+                            </h5>
+                            <p class="mb-0 text-muted">{{ cluster.files | join(', ') | truncate(100) }}</p>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            {% if cluster.files | length > 1 %}
+                            <span class="badge bg-warning">Similar Files</span>
+                            {% else %}
+                            <span class="badge bg-secondary">No Matches</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <!-- Expandable cluster content -->
+                    <div id="cluster-{{ cluster.cluster_id }}" class="cluster-files">
+                        <hr>
+                        <h6>📋 Files in this {% if cluster.files | length == 1 %}standalone group{% else %}cluster{% endif %}:</h6>
+                        <ul class="list-unstyled">
+                            {% for file in cluster.files %}
+                            <li class="mb-1">📄 {{ file }}</li>
+                            {% endfor %}
+                        </ul>
+                        
+                        {% if cluster.files | length > 1 %}
+                        <h6>🔍 Similarity Comparisons:</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>File 1</th>
+                                        <th>File 2</th>
+                                        <th>Avg</th>
+                                        <th>Difflib</th>
+                                        <th>TF-IDF</th>
+                                        <th>AST</th>
+                                        <th>Jaccard</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for comparison in report.comparisons %}
+                                    {% if comparison.file1 in cluster.files and comparison.file2 in cluster.files %}
+                                    <tr>
+                                        <td><small>{{ comparison.file1 }}</small></td>
+                                        <td><small>{{ comparison.file2 }}</small></td>
+                                        <td>
+                                            <span class="badge similarity-badge 
+                                                {% if comparison.average >= 0.7 %}score-high
+                                                {% elif comparison.average >= 0.4 %}score-medium
+                                                {% else %}score-low{% endif %}">
+                                                {{ (comparison.average * 100) | round(1) }}%
+                                            </span>
+                                        </td>
+                                        <td><small>{{ (comparison.difflib * 100) | round(1) }}%</small></td>
+                                        <td><small>{{ (comparison.tfidf * 100) | round(1) }}%</small></td>
+                                        <td><small>{{ (comparison.ast * 100) | round(1) }}%</small></td>
+                                        <td><small>{{ (comparison.jaccard * 100) | round(1) }}%</small></td>
+                                        <td>
+                                            <a href="{{ url_for('report_detail', report_id=report_id, file1=comparison.file1, file2=comparison.file2) }}" 
+                                               class="btn btn-sm btn-outline-primary">View</a>
+                                        </td>
+                                    </tr>
+                                    {% endif %}
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
             </div>
             {% endfor %}
             {% else %}
             <div class="alert alert-info">
-                No significant clusters detected above the threshold.
+                <h5>ℹ️ No Significant Clusters Found</h5>
+                <p>No files exceeded the similarity threshold of {{ (report.threshold * 100) | round(2) }}%. All files appear to be unique.</p>
             </div>
             {% endif %}
-            
-            <div class="text-center mt-4">
-                <a href="/dashboard" class="btn btn-primary">Back to Dashboard</a>
+        </div>
+    </div>
+
+    <!-- All Comparisons Section -->
+    <div class="card shadow">
+        <div class="card-header">
+            <h3 class="mb-0">📊 All Pairwise Comparisons</h3>
+            <small>Sorted by average similarity (highest first)</small>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>File 1</th>
+                            <th>File 2</th>
+                            <th>Average</th>
+                            <th>Difflib</th>
+                            <th>TF-IDF</th>
+                            <th>AST</th>
+                            <th>Jaccard</th>
+                            <th>Languages</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for comparison in report.comparisons %}
+                        <tr class="{% if comparison.average >= report.threshold %}table-warning{% endif %}">
+                            <td>{{ comparison.file1 }}</td>
+                            <td>{{ comparison.file2 }}</td>
+                            <td>
+                                <span class="badge similarity-badge 
+                                    {% if comparison.average >= 0.7 %}score-high
+                                    {% elif comparison.average >= 0.4 %}score-medium
+                                    {% else %}score-low{% endif %}">
+                                    {{ (comparison.average * 100) | round(1) }}%
+                                </span>
+                            </td>
+                            <td>{{ (comparison.difflib * 100) | round(1) }}%</td>
+                            <td>{{ (comparison.tfidf * 100) | round(1) }}%</td>
+                            <td>{{ (comparison.ast * 100) | round(1) }}%</td>
+                            <td>{{ (comparison.jaccard * 100) | round(1) }}%</td>
+                            <td><small>{{ comparison.language1 }}{% if comparison.language1 != comparison.language2 %} vs {{ comparison.language2 }}{% endif %}</small></td>
+                            <td>
+                                <a href="{{ url_for('report_detail', report_id=report_id, file1=comparison.file1, file2=comparison.file2) }}" 
+                                   class="btn btn-sm btn-outline-primary">View Details</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
+
+    <!-- Footer -->
+    <div class="text-center mt-4 mb-4">
+        <div class="mb-3">
+            <small class="text-muted">
+                Report Generated: {{ report.timestamp | replace('T', ' ') | replace('Z', '') }} | 
+                Report ID: {{ report_id }} | 
+                Languages: {{ report.languages_detected | join(', ') }}
+            </small>
+        </div>
+        <a href="/dashboard" class="btn btn-primary btn-lg">🏠 Back to Dashboard</a>
+    </div>
 </div>
+
+<script>
+function toggleCluster(clusterId) {
+    const clusterContent = document.getElementById('cluster-' + clusterId);
+    clusterContent.classList.toggle('show');
+}
+</script>
 </body>
 </html>

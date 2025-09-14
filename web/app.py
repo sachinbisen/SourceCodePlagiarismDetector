@@ -48,11 +48,30 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 THRESHOLD = 0.7
 
 # Preprocessing Functions
-def remove_comments(code):
-    code = re.sub(r'#.*', '', code)
-    code = re.sub(r'""".*?"""', '', code, flags=re.DOTALL)
-    code = re.sub(r"'''.*?'''", '', code, flags=re.DOTALL)
+def remove_comments(code, language='python'):
+    """Remove comments based on language type"""
+    if language in ['python']:
+        code = re.sub(r'#.*', '', code)  # Python comments
+        code = re.sub(r'""".*?"""', '', code, flags=re.DOTALL)  # Python docstrings
+        code = re.sub(r"'''.*?'''", '', code, flags=re.DOTALL)  # Python docstrings
+    elif language in ['cpp', 'c', 'java', 'javascript']:
+        code = re.sub(r'//.*', '', code)  # Single-line comments
+        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)  # Multi-line comments
+    
     return code
+
+def detect_language(filename):
+    """Detect programming language from file extension"""
+    ext = os.path.splitext(filename.lower())[1]
+    language_map = {
+        '.py': 'python',
+        '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp',
+        '.c': 'c', '.h': 'c',
+        '.java': 'java',
+        '.js': 'javascript', '.jsx': 'javascript',
+        '.ts': 'javascript', '.tsx': 'javascript'
+    }
+    return language_map.get(ext, 'unknown')
 
 def normalize_identifiers(code, base_code_tokens=None):
     try:
@@ -67,10 +86,24 @@ def normalize_identifiers(code, base_code_tokens=None):
         'parameters': defaultdict(lambda: f'p{len(id_maps["parameters"])}')
     }
 
+    # Enhanced preserved names for multiple languages
     PRESERVED_NAMES = {
+        # Python
         'print', 'range', 'len', 'str', 'int', 'float', 'list',
         'dict', 'set', 'tuple', 'open', 'super', '__init__',
-        'True', 'False', 'None'
+        'True', 'False', 'None', 'def', 'class', 'import', 'from',
+        # C/C++
+        'printf', 'scanf', 'malloc', 'free', 'sizeof', 'struct', 'typedef',
+        'include', 'define', 'ifdef', 'ifndef', 'endif', 'true', 'false',
+        'cout', 'cin', 'endl', 'std', 'namespace', 'using', 'public', 'private',
+        'protected', 'virtual', 'class', 'template', 'typename',
+        # Java
+        'System', 'out', 'println', 'String', 'Integer', 'Double', 'Boolean',
+        'public', 'private', 'protected', 'static', 'final', 'abstract',
+        'extends', 'implements', 'interface', 'package', 'import',
+        # JavaScript
+        'console', 'log', 'function', 'var', 'let', 'const', 'return',
+        'document', 'window', 'undefined', 'null'
     }
 
     class Normalizer(ast.NodeTransformer):
@@ -123,9 +156,19 @@ def normalize_identifiers(code, base_code_tokens=None):
     except:
         return code
 
-def preprocess_code(code, base_code_tokens=None):
-    code = remove_comments(code)
-    code = normalize_identifiers(code, base_code_tokens)
+def preprocess_code(code, base_code_tokens=None, language='python'):
+    """Preprocess code with language-specific handling"""
+    code = remove_comments(code, language)
+    
+    # Only attempt AST normalization for Python files
+    if language == 'python':
+        code = normalize_identifiers(code, base_code_tokens)
+    else:
+        # For non-Python files, just do basic text normalization
+        if base_code_tokens:
+            words = re.findall(r'\b\w+\b|\W+', code)
+            code = ''.join([word if (word not in base_code_tokens or not word.isidentifier()) else '' for word in words])
+    
     return code
 
 # Similarity Calculation Functions
@@ -173,6 +216,38 @@ def similarity_ast_with_exclusion(text1, text2, base_tokens):
         return len(intersection) / len(union) if union else 0.0
     except Exception:
         return 0.0
+
+def calculate_comprehensive_similarity(text1, text2, language='python'):
+    """Calculate similarity using all 4 algorithms and return average"""
+    # Calculate all similarity scores
+    scores = {}
+    
+    # Difflib (sequence matching)
+    scores['difflib'] = similarity_difflib(text1, text2)
+    
+    # TF-IDF Cosine similarity
+    scores['tfidf'] = similarity_cosine(text1, text2)
+    
+    # AST similarity (only for Python, fallback to difflib for others)
+    if language == 'python':
+        scores['ast'] = similarity_ast(text1, text2)
+    else:
+        # For non-Python files, use difflib as AST alternative
+        scores['ast'] = similarity_difflib(text1, text2)
+    
+    # Jaccard similarity
+    scores['jaccard'] = similarity_jaccard(text1, text2)
+    
+    # Calculate average
+    average_score = sum(scores.values()) / len(scores)
+    
+    return {
+        'difflib': scores['difflib'],
+        'tfidf': scores['tfidf'], 
+        'ast': scores['ast'],
+        'jaccard': scores['jaccard'],
+        'average': average_score
+    }
 
 # Visualization Functions
 def generate_similarity_chart(score, output_path):
@@ -222,41 +297,72 @@ def save_history_to_firestore(username, filename1, filename2, method, score):
 
 # Bulk Analysis Functions
 def extract_base_code_tokens(base_code_path):
-    """Extract all tokens from base code for exclusion"""
+    """Extract all tokens from base code for exclusion - now supports multiple languages"""
     tokens = set()
+    code_extensions = ['.py', '.cpp', '.cc', '.cxx', '.c', '.h', '.java', '.js', '.jsx', '.ts', '.tsx']
+    
     for root, _, files in os.walk(base_code_path):
         for file in files:
-            if file.endswith('.py'):
-                with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    preprocessed = preprocess_code(content)
-                    # Tokenize the code
-                    tokens.update(set(re.findall(r'\b\w+\b', preprocessed)))
+            if any(file.lower().endswith(ext) for ext in code_extensions):
+                try:
+                    with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        language = detect_language(file)
+                        preprocessed = preprocess_code(content, language=language)
+                        # Tokenize the code
+                        tokens.update(set(re.findall(r'\b\w+\b', preprocessed)))
+                except Exception as e:
+                    print(f"Error processing base code file {file}: {str(e)}")
+                    continue
     return tokens
 
-def cluster_similar_files(results, threshold):
+def cluster_similar_files_enhanced(results, threshold, all_files):
     """
-    Cluster files based on similarity scores using single-linkage clustering
-    Returns a list of clusters and the detailed comparisons
+    Enhanced clustering that properly handles file grouping and standalone files
+    Returns structured clusters with IDs and standalone files
     """
     # Create a graph where nodes are files and edges represent similarity above threshold
     G = nx.Graph()
     
-    # Add all files as nodes and create edges for similar pairs
+    # Add all files as nodes first
+    for filename in all_files:
+        G.add_node(filename)
+    
+    # Create edges for similar pairs (using average similarity)
     for result in results:
-        if result['score'] >= threshold:
-            G.add_edge(result['file1'], result['file2'], weight=result['score'])
+        if result['average'] >= threshold:
+            G.add_edge(result['file1'], result['file2'], weight=result['average'])
     
     # Find connected components (clusters)
-    clusters = []
-    for component in connected_components(G):
-        if len(component) > 1:  # Only include clusters with at least 2 files
-            clusters.append(list(component))
+    raw_clusters = list(connected_components(G))
+    
+    # Separate multi-file clusters from standalone files
+    multi_file_clusters = [list(component) for component in raw_clusters if len(component) > 1]
+    standalone_files = [list(component)[0] for component in raw_clusters if len(component) == 1]
     
     # Sort clusters by size (largest first)
-    clusters.sort(key=len, reverse=True)
+    multi_file_clusters.sort(key=len, reverse=True)
     
-    return clusters, results
+    # Create structured cluster data
+    structured_clusters = []
+    
+    # Add multi-file clusters
+    for i, cluster_files in enumerate(multi_file_clusters, 1):
+        structured_clusters.append({
+            'cluster_id': i,
+            'files': sorted(cluster_files),  # Sort files alphabetically
+            'type': 'cluster'
+        })
+    
+    # Add standalone files as individual clusters
+    for filename in sorted(standalone_files):  # Sort alphabetically
+        structured_clusters.append({
+            'cluster_id': len(multi_file_clusters) + standalone_files.index(filename) + 1,
+            'files': [filename],
+            'type': 'standalone'
+        })
+    
+    return structured_clusters
 
 def generate_bulk_report(results, threshold):
     """Generate comprehensive PDF report for all comparisons"""
@@ -641,19 +747,20 @@ def bulk_similarity():
                     file.save(file_path)
             base_code_tokens = extract_base_code_tokens(base_code_path)
         
-        # Get all code files
+        # Get all code files (support multiple languages)
+        code_extensions = ['.py', '.cpp', '.cc', '.cxx', '.c', '.h', '.java', '.js', '.jsx', '.ts', '.tsx']
         code_files = []
         for root, _, files in os.walk(submissions_path):
             for file in files:
-                if file.endswith('.py'):
+                if any(file.lower().endswith(ext) for ext in code_extensions):
                     code_files.append(os.path.join(root, file))
         
         # Check if we have at least 2 files to compare
         if len(code_files) < 2:
-            session['error_message'] = "Not enough Python files found for comparison. Please ensure your folder contains at least 2 Python files."
+            session['error_message'] = f"Not enough code files found for comparison. Please ensure your folder contains at least 2 code files with supported extensions: {', '.join(code_extensions)}"
             return redirect(url_for('dashboard'))
         
-        # Perform pairwise comparisons
+        # Perform comprehensive pairwise comparisons
         results = []
         total_comparisons = len(code_files) * (len(code_files) - 1) // 2
         completed = 0
@@ -662,59 +769,97 @@ def bulk_similarity():
         session['total_comparisons'] = total_comparisons
         session['completed_comparisons'] = 0
         
+        # Get all filenames for clustering
+        all_filenames = [os.path.basename(f) for f in code_files]
+        
         for i in range(len(code_files)):
             for j in range(i + 1, len(code_files)):
                 file1 = code_files[i]
                 file2 = code_files[j]
+                filename1 = os.path.basename(file1)
+                filename2 = os.path.basename(file2)
                 
                 try:
                     with open(file1, 'r', encoding='utf-8') as f1, open(file2, 'r', encoding='utf-8') as f2:
                         content1 = f1.read()
                         content2 = f2.read()
                     
-                    # Preprocess code with base code exclusion
-                    preprocessed1 = preprocess_code(content1, base_code_tokens)
-                    preprocessed2 = preprocess_code(content2, base_code_tokens)
+                    # Detect languages
+                    lang1 = detect_language(filename1)
+                    lang2 = detect_language(filename2)
                     
-                    # Calculate similarity with base code exclusion
-                    similarity_score = similarity_ast_with_exclusion(
-                        preprocessed1, preprocessed2, base_code_tokens
+                    # Preprocess code with language awareness
+                    preprocessed1 = preprocess_code(content1, base_code_tokens, lang1)
+                    preprocessed2 = preprocess_code(content2, base_code_tokens, lang2)
+                    
+                    # Calculate comprehensive similarity scores
+                    similarity_results = calculate_comprehensive_similarity(
+                        preprocessed1, preprocessed2, lang1 if lang1 == lang2 else 'unknown'
                     )
                     
-                    # Store all results (not just those above threshold)
+                    # Store comprehensive results
                     results.append({
-                        'file1': os.path.basename(file1),
-                        'file2': os.path.basename(file2),
-                        'score': similarity_score,
+                        'file1': filename1,
+                        'file2': filename2,
+                        'difflib': similarity_results['difflib'],
+                        'tfidf': similarity_results['tfidf'],
+                        'ast': similarity_results['ast'],
+                        'jaccard': similarity_results['jaccard'],
+                        'average': similarity_results['average'],
                         'content1': content1,
                         'content2': content2,
                         'preprocessed1': preprocessed1,
-                        'preprocessed2': preprocessed2
+                        'preprocessed2': preprocessed2,
+                        'language1': lang1,
+                        'language2': lang2
                     })
                 except Exception as e:
+                    print(f"Error processing {filename1} vs {filename2}: {str(e)}")
                     # Skip files that can't be read
                     continue
                 
                 completed += 1
                 session['completed_comparisons'] = completed
         
-        # Cluster the results
-        clusters, detailed_results = cluster_similar_files(results, threshold)
+        # Sort results by average similarity (descending)
+        results.sort(key=lambda x: x['average'], reverse=True)
         
-        # Store the analysis in Firestore
+        # Enhanced clustering with structured data
+        clusters = cluster_similar_files_enhanced(results, threshold, all_filenames)
         
+        # Prepare clean report data for Firestore
         timestamp = datetime.now().isoformat()
+        
+        # Clean comparisons data (remove large content fields for storage)
+        clean_comparisons = []
+        for result in results:
+            clean_comparisons.append({
+                'file1': result['file1'],
+                'file2': result['file2'],
+                'difflib': round(result['difflib'], 4),
+                'tfidf': round(result['tfidf'], 4),
+                'ast': round(result['ast'], 4),
+                'jaccard': round(result['jaccard'], 4),
+                'average': round(result['average'], 4),
+                'language1': result['language1'],
+                'language2': result['language2']
+            })
+        
         report_data = {
             'user': session['user'],
             'timestamp': timestamp,
             'threshold': threshold,
-            'clusters': fix_nested_arrays(clusters),
-            'comparisons': fix_nested_arrays(detailed_results),
-            'total_files': len(code_files)
+            'clusters': clusters,  # Already clean structured data
+            'comparisons': clean_comparisons,  # Clean comparison data
+            'total_files': len(code_files),
+            'file_extensions': list(set([os.path.splitext(f.lower())[1] for f in all_filenames])),
+            'languages_detected': list(set([detect_language(f) for f in all_filenames]))
         }
-
-        print("REPORT DATA (Firestore safe):", report_data)
-
+        
+        print("ENHANCED REPORT DATA:", report_data)
+        
+        # Store detailed results in session for the report view (with full content)
+        session['detailed_results'] = results
         
         # Add to Firestore and get the document ID
         doc_ref = db.collection('bulk_analyses').add(report_data)
@@ -753,7 +898,7 @@ def report_detail(report_id, file1, file2):
     if not report_data or report_data['user'] != session['user']:
         return render_template('error.html', error_message="Report not found or access denied.")
     
-    # Find the specific comparison
+    # Find the specific comparison in the clean data
     comparison = None
     for comp in report_data['comparisons']:
         if (comp['file1'] == file1 and comp['file2'] == file2) or \
@@ -764,26 +909,57 @@ def report_detail(report_id, file1, file2):
     if not comparison:
         return render_template('error.html', error_message="Comparison not found.")
     
-    # Generate HTML diff for the comparison
-    html_diff = HtmlDiff().make_table(
-        comparison['preprocessed1'].splitlines(), 
-        comparison['preprocessed2'].splitlines(), 
-        comparison['file1'], 
-        comparison['file2'], 
-        context=True, 
-        numlines=3
-    )
+    # Try to get detailed results from session (has full content)
+    detailed_results = session.get('detailed_results', [])
+    detailed_comparison = None
+    
+    for detail in detailed_results:
+        if (detail['file1'] == file1 and detail['file2'] == file2) or \
+           (detail['file1'] == file2 and detail['file2'] == file1):
+            detailed_comparison = detail
+            break
+    
+    # If we have detailed results, use them for diff generation
+    if detailed_comparison:
+        html_diff = HtmlDiff().make_table(
+            detailed_comparison['preprocessed1'].splitlines(), 
+            detailed_comparison['preprocessed2'].splitlines(), 
+            detailed_comparison['file1'], 
+            detailed_comparison['file2'], 
+            context=True, 
+            numlines=3
+        )
+        original_text1 = detailed_comparison['content1']
+        original_text2 = detailed_comparison['content2']
+        preprocessed_text1 = detailed_comparison['preprocessed1']
+        preprocessed_text2 = detailed_comparison['preprocessed2']
+    else:
+        # Fallback if no detailed results available
+        html_diff = "<p>Detailed comparison not available. Please re-run the analysis.</p>"
+        original_text1 = "Content not available"
+        original_text2 = "Content not available"
+        preprocessed_text1 = "Content not available"
+        preprocessed_text2 = "Content not available"
+    
+    # Enhanced scores data
+    all_scores = {
+        'difflib': comparison['difflib'],
+        'tfidf': comparison['tfidf'],
+        'ast': comparison['ast'],
+        'jaccard': comparison['jaccard'],
+        'average': comparison['average']
+    }
     
     return render_template('results.html', 
-                         method='AST', 
-                         score=comparison['score'],
-                         original_text1=comparison['content1'],
-                         original_text2=comparison['content2'],
-                         preprocessed_text1=comparison['preprocessed1'],
-                         preprocessed_text2=comparison['preprocessed2'],
+                         method='COMPREHENSIVE', 
+                         score=comparison['average'],
+                         original_text1=original_text1,
+                         original_text2=original_text2,
+                         preprocessed_text1=preprocessed_text1,
+                         preprocessed_text2=preprocessed_text2,
                          html_diff=html_diff, 
-                         threshold_alert=comparison['score'] >= report_data['threshold'],
-                         all_scores={'ast': comparison['score']})
+                         threshold_alert=comparison['average'] >= report_data['threshold'],
+                         all_scores=all_scores)
 
 @app.route('/similarity', methods=['POST'])
 def compare():
