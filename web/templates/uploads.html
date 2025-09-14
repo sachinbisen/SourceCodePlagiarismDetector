@@ -2,6 +2,7 @@
 <html>
 <head><title>Upload Code File</title></head>
 <body>
+  <!-- File Upload -->
   <h2>Upload Code File</h2>
   <form method="POST" enctype="multipart/form-data">
     <label>User ID:</label><br>
@@ -15,5 +16,22 @@
 
     <button type="submit">Upload</button>
   </form>
+  <!-- Folder Upload -->
+<h2>Bulk Analysis (JPlag-like)</h2>
+<form method="POST" enctype="multipart/form-data" action="/bulk_similarity">
+  <label>User ID:</label><br>
+  <input type="text" name="user_id" required><br><br>
+  
+  <label>Submissions Folder:</label><br>
+  <input type="file" name="submissions_folder" webkitdirectory directory required><br><br>
+  
+  <label>Base Code Folder (optional):</label><br>
+  <input type="file" name="base_code_folder" webkitdirectory directory><br><br>
+  
+  <label>Similarity Threshold (e.g., 0.7 for 70%):</label><br>
+  <input type="number" name="threshold" min="0" max="1" step="0.01" value="0.7" required><br><br>
+
+  <button type="submit">Analyze Folder</button>
+</form>
 </body>
 </html>
