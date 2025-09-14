@@ -232,6 +232,51 @@
         .tab-content.active {
             display: block;
         }
+
+        /* Popup styles for validation */
+        .validation-popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(22, 28, 43, 0.95);
+            color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0px 0px 20px rgba(255, 0, 0, 0.3);
+            z-index: 2000;
+            text-align: center;
+            border: 2px solid #dc3545;
+        }
+
+        .validation-popup h3 {
+            margin-top: 0;
+            color: #dc3545;
+        }
+
+        .popup-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1999;
+        }
+
+        .popup-btn {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+
+        .popup-btn:hover {
+            background-color: #c82333;
+        }
     </style>
 </head>
 <body>
@@ -265,19 +310,19 @@
 
         <!-- Single File Comparison Form -->
         <div class="tab-content active" id="single-comparison">
-            <form action="/similarity" method="POST" enctype="multipart/form-data">
+            <form action="/similarity" method="POST" enctype="multipart/form-data" onsubmit="return validateSingleComparison(event)">
                 <div class="form-row">
                     <div class="form-group">
                         <label for="file1">Upload File 1</label>
                         <label for="file1" class="file-label">Choose File</label>
-                        <input type="file" id="file1" name="file1" required>
+                        <input type="file" id="file1" name="file1">
                         <div id="file1-name" class="file-name">No file chosen</div>
                     </div>
 
                     <div class="form-group">
                         <label for="file2">Upload File 2</label>
                         <label for="file2" class="file-label">Choose File</label>
-                        <input type="file" id="file2" name="file2" required>
+                        <input type="file" id="file2" name="file2">
                         <div id="file2-name" class="file-name">No file chosen</div>
                     </div>
                 </div>
@@ -303,11 +348,11 @@
 
         <!-- Bulk Analysis Form -->
         <div class="tab-content" id="bulk-analysis">
-            <form method="POST" enctype="multipart/form-data" action="/bulk_similarity">
+            <form method="POST" enctype="multipart/form-data" action="/bulk_similarity" onsubmit="return validateBulkAnalysis(event)">
                 <div class="form-group">
                     <label for="submissions_folder">Submissions Folder:</label>
                     <label for="submissions_folder" class="file-label">Choose Folder</label>
-                    <input type="file" id="submissions_folder" name="submissions_folder" webkitdirectory directory required>
+                    <input type="file" id="submissions_folder" name="submissions_folder" webkitdirectory directory>
                     <div id="submissions-folder-name" class="file-name">No folder chosen</div>
                 </div>
 
@@ -320,7 +365,7 @@
 
                 <div class="form-group">
                     <label for="threshold">Similarity Threshold (e.g., 0.7 for 70%):</label>
-                    <input type="number" id="threshold" name="threshold" min="0" max="1" step="0.01" value="0.7" required 
+                    <input type="number" id="threshold" name="threshold" min="0" max="1" step="0.01" value="0.7"
                            style="width: 96%; padding: 12px; background-color: rgba(45, 55, 75, 0.6); border: none; border-radius: 4px; color: white; font-size: 16px;">
                 </div>
                 <br>
@@ -383,6 +428,153 @@
                 document.getElementById(`${tabId}-${tabId === 'single' ? 'comparison' : 'analysis'}`).classList.add('active');
             });
         });
+
+        // Ensure validation is set up when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, setting up validation');
+            
+            // Check single comparison form
+            const singleForm = document.querySelector('#single-comparison form');
+            if (singleForm) {
+                console.log('Single comparison form found, validation should work');
+                if (typeof validateSingleComparison === 'function') {
+                    console.log('validateSingleComparison function is available');
+                } else {
+                    console.error('validateSingleComparison function not found!');
+                }
+            } else {
+                console.error('Single comparison form not found!');
+            }
+            
+            // Check bulk analysis form
+            const bulkForm = document.querySelector('#bulk-analysis form');
+            if (bulkForm) {
+                console.log('Bulk analysis form found, validation should work');
+                if (typeof validateBulkAnalysis === 'function') {
+                    console.log('validateBulkAnalysis function is available');
+                } else {
+                    console.error('validateBulkAnalysis function not found!');
+                }
+            } else {
+                console.error('Bulk analysis form not found!');
+            }
+        });
+
+        // Validation function for single comparison
+        function validateSingleComparison(event) {
+            console.log('Validation function called'); // Debug log
+            
+            const file1Input = document.getElementById('file1');
+            const file2Input = document.getElementById('file2');
+            
+            // Check if inputs exist
+            if (!file1Input || !file2Input) {
+                console.error('File input elements not found');
+                return true; // Let form submit normally if inputs not found
+            }
+            
+            const file1 = file1Input.files[0];
+            const file2 = file2Input.files[0];
+            
+            console.log('File1:', file1, 'File2:', file2); // Debug log
+            
+            // Check if both files are selected
+            if (!file1 || !file2) {
+                event.preventDefault();
+                event.stopPropagation();
+                showValidationPopup('No files selected', 'Please select both files before comparing.');
+                return false;
+            }
+            
+            console.log('Validation passed'); // Debug log
+            return true;
+        }
+
+        // Validation function for bulk analysis
+        function validateBulkAnalysis(event) {
+            console.log('Bulk validation function called'); // Debug log
+            
+            const submissionsFolderInput = document.getElementById('submissions_folder');
+            const thresholdInput = document.getElementById('threshold');
+            
+            // Check if inputs exist
+            if (!submissionsFolderInput || !thresholdInput) {
+                console.error('Bulk analysis input elements not found');
+                return true; // Let form submit normally if inputs not found
+            }
+            
+            const submissionsFolder = submissionsFolderInput.files;
+            const threshold = thresholdInput.value;
+            
+            console.log('Submissions folder files:', submissionsFolder.length, 'Threshold:', threshold); // Debug log
+            
+            // Check if submissions folder is selected
+            if (!submissionsFolder || submissionsFolder.length === 0) {
+                event.preventDefault();
+                event.stopPropagation();
+                showValidationPopup('No folder selected', 'Please select a submissions folder before analyzing.');
+                return false;
+            }
+            
+            // Check if threshold is valid
+            if (!threshold || threshold < 0 || threshold > 1) {
+                event.preventDefault();
+                event.stopPropagation();
+                showValidationPopup('Invalid threshold', 'Please enter a valid similarity threshold between 0 and 1.');
+                return false;
+            }
+            
+            console.log('Bulk validation passed'); // Debug log
+            return true;
+        }
+
+        // Show validation popup
+        function showValidationPopup(title, message) {
+            console.log('Showing popup:', title, message); // Debug log
+            
+            // Remove any existing popups first
+            closeValidationPopup();
+            
+            // Create overlay
+            const overlay = document.createElement('div');
+            overlay.className = 'popup-overlay';
+            
+            // Create popup
+            const popup = document.createElement('div');
+            popup.className = 'validation-popup';
+            popup.innerHTML = `
+                <h3>! ${title}</h3>
+                <p>${message}</p>
+                <button class="popup-btn" onclick="closeValidationPopup()">OK</button>
+            `;
+            
+            // Add to page
+            document.body.appendChild(overlay);
+            document.body.appendChild(popup);
+            
+            // Close on overlay click
+            overlay.addEventListener('click', closeValidationPopup);
+            
+            // Close on Escape key
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    closeValidationPopup();
+                }
+            });
+            
+            console.log('Popup created and added to DOM');
+        }
+
+        // Close validation popup
+        function closeValidationPopup() {
+            const overlays = document.querySelectorAll('.popup-overlay');
+            const popups = document.querySelectorAll('.validation-popup');
+            
+            overlays.forEach(overlay => overlay.remove());
+            popups.forEach(popup => popup.remove());
+            
+            console.log('Popup closed');
+        }
     </script>
 </body>
 </html>

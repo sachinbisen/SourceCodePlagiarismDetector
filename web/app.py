@@ -48,11 +48,30 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 THRESHOLD = 0.7
 
 # Preprocessing Functions
-def remove_comments(code):
-    code = re.sub(r'#.*', '', code)
-    code = re.sub(r'""".*?"""', '', code, flags=re.DOTALL)
-    code = re.sub(r"'''.*?'''", '', code, flags=re.DOTALL)
+def remove_comments(code, language='python'):
+    """Remove comments based on language type"""
+    if language in ['python']:
+        code = re.sub(r'#.*', '', code)  # Python comments
+        code = re.sub(r'""".*?"""', '', code, flags=re.DOTALL)  # Python docstrings
+        code = re.sub(r"'''.*?'''", '', code, flags=re.DOTALL)  # Python docstrings
+    elif language in ['cpp', 'c', 'java', 'javascript']:
+        code = re.sub(r'//.*', '', code)  # Single-line comments
+        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)  # Multi-line comments
+    
     return code
+
+def detect_language(filename):
+    """Detect programming language from file extension"""
+    ext = os.path.splitext(filename.lower())[1]
+    language_map = {
+        '.py': 'python',
+        '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp',
+        '.c': 'c', '.h': 'c',
+        '.java': 'java',
+        '.js': 'javascript', '.jsx': 'javascript',
+        '.ts': 'javascript', '.tsx': 'javascript'
+    }
+    return language_map.get(ext, 'unknown')
 
 def normalize_identifiers(code, base_code_tokens=None):
     try:
@@ -67,10 +86,24 @@ def normalize_identifiers(code, base_code_tokens=None):
         'parameters': defaultdict(lambda: f'p{len(id_maps["parameters"])}')
     }
 
+    # Enhanced preserved names for multiple languages
     PRESERVED_NAMES = {
+        # Python
         'print', 'range', 'len', 'str', 'int', 'float', 'list',
         'dict', 'set', 'tuple', 'open', 'super', '__init__',
-        'True', 'False', 'None'
+        'True', 'False', 'None', 'def', 'class', 'import', 'from',
+        # C/C++
+        'printf', 'scanf', 'malloc', 'free', 'sizeof', 'struct', 'typedef',
+        'include', 'define', 'ifdef', 'ifndef', 'endif', 'true', 'false',
+        'cout', 'cin', 'endl', 'std', 'namespace', 'using', 'public', 'private',
+        'protected', 'virtual', 'class', 'template', 'typename',
+        # Java
+        'System', 'out', 'println', 'String', 'Integer', 'Double', 'Boolean',
+        'public', 'private', 'protected', 'static', 'final', 'abstract',
+        'extends', 'implements', 'interface', 'package', 'import',
+        # JavaScript
+        'console', 'log', 'function', 'var', 'let', 'const', 'return',
+        'document', 'window', 'undefined', 'null'
     }
 
     class Normalizer(ast.NodeTransformer):
@@ -123,9 +156,19 @@ def normalize_identifiers(code, base_code_tokens=None):
     except:
         return code
 
-def preprocess_code(code, base_code_tokens=None):
-    code = remove_comments(code)
-    code = normalize_identifiers(code, base_code_tokens)
+def preprocess_code(code, base_code_tokens=None, language='python'):
+    """Preprocess code with language-specific handling"""
+    code = remove_comments(code, language)
+    
+    # Only attempt AST normalization for Python files
+    if language == 'python':
+        code = normalize_identifiers(code, base_code_tokens)
+    else:
+        # For non-Python files, just do basic text normalization
+        if base_code_tokens:
+            words = re.findall(r'\b\w+\b|\W+', code)
+            code = ''.join([word if (word not in base_code_tokens or not word.isidentifier()) else '' for word in words])
+    
     return code
 
 # Similarity Calculation Functions
@@ -173,6 +216,105 @@ def similarity_ast_with_exclusion(text1, text2, base_tokens):
         return len(intersection) / len(union) if union else 0.0
     except Exception:
         return 0.0
+
+def calculate_comprehensive_similarity(text1, text2, language='python'):
+    """Calculate similarity using all 4 algorithms and return average"""
+    # Calculate all similarity scores
+    scores = {}
+    
+    # Difflib (sequence matching)
+    scores['difflib'] = similarity_difflib(text1, text2)
+    
+    # TF-IDF Cosine similarity
+    scores['tfidf'] = similarity_cosine(text1, text2)
+    
+    # AST similarity (only for Python, fallback to difflib for others)
+    if language == 'python':
+        scores['ast'] = similarity_ast(text1, text2)
+    else:
+        # For non-Python files, use difflib as AST alternative
+        scores['ast'] = similarity_difflib(text1, text2)
+    
+    # Jaccard similarity
+    scores['jaccard'] = similarity_jaccard(text1, text2)
+    
+    # Calculate average
+    average_score = sum(scores.values()) / len(scores)
+    
+    return {
+        'difflib': scores['difflib'],
+        'tfidf': scores['tfidf'], 
+        'ast': scores['ast'],
+        'jaccard': scores['jaccard'],
+        'average': average_score
+    }
+
+# Algorithm descriptions for PDF reports
+ALGORITHM_DESCRIPTIONS = {
+    'difflib': {
+        'name': 'Difflib (Sequence Matching)',
+        'description': 'Compares code as sequences of characters, identifying longest common subsequences. Effective for detecting exact matches and minor modifications.'
+    },
+    'cosine': {
+        'name': 'TF-IDF Cosine Similarity', 
+        'description': 'Converts code to TF-IDF vectors and calculates cosine similarity. Good for detecting structural similarities regardless of variable names.'
+    },
+    'ast': {
+        'name': 'AST (Abstract Syntax Tree)',
+        'description': 'Analyzes the syntactic structure of code by comparing Abstract Syntax Trees. Most effective for detecting structural plagiarism.'
+    },
+    'jaccard': {
+        'name': 'Jaccard Similarity',
+        'description': 'Measures similarity as the ratio of common tokens to total unique tokens. Useful for detecting copied code with minor additions.'
+    }
+}
+
+def get_similarity_analysis(scores):
+    """Generate textual analysis of similarity scores"""
+    avg_score = scores.get('average', sum(scores.values()) / len(scores))
+    high_scores = [name for name, score in scores.items() if name != 'average' and score >= 0.7]
+    medium_scores = [name for name, score in scores.items() if name != 'average' and 0.4 <= score < 0.7]
+    low_scores = [name for name, score in scores.items() if name != 'average' and score < 0.4]
+    
+    analysis = []
+    
+    # Overall similarity assessment
+    if avg_score >= 0.8:
+        analysis.append("Overall Assessment: HIGH SIMILARITY - The codes show strong structural and content similarities.")
+    elif avg_score >= 0.6:
+        analysis.append("Overall Assessment: MODERATE SIMILARITY - The codes share significant common elements.")
+    elif avg_score >= 0.4:
+        analysis.append("Overall Assessment: LOW SIMILARITY - Some common patterns detected but mostly different.")
+    else:
+        analysis.append("Overall Assessment: MINIMAL SIMILARITY - The codes appear to be largely unique.")
+    
+    # Algorithm-specific insights
+    if high_scores:
+        analysis.append(f"High similarity detected by: {', '.join([ALGORITHM_DESCRIPTIONS[algo]['name'] for algo in high_scores if algo in ALGORITHM_DESCRIPTIONS])}.")
+    
+    if 'ast' in high_scores and 'difflib' in low_scores:
+        analysis.append("Structural similarity is high but text similarity is low, suggesting variable/function renaming.")
+    
+    if 'difflib' in high_scores and 'cosine' in low_scores:
+        analysis.append("High text similarity but low semantic similarity may indicate copied code with structural changes.")
+    
+    if all(score >= 0.7 for score in [scores.get('difflib', 0), scores.get('cosine', 0), scores.get('ast', 0), scores.get('jaccard', 0)]):
+        analysis.append("All algorithms show high similarity - strong evidence of code replication.")
+    
+    return ' '.join(analysis)
+
+def get_similarity_category(score):
+    """Categorize similarity score"""
+    if score >= 0.8:
+        return 'Very High'
+    elif score >= 0.6:
+        return 'High'
+    elif score >= 0.4:
+        return 'Medium'
+    elif score >= 0.2:
+        return 'Low'
+    else:
+        return 'Very Low'
 
 # Visualization Functions
 def generate_similarity_chart(score, output_path):
@@ -222,41 +364,72 @@ def save_history_to_firestore(username, filename1, filename2, method, score):
 
 # Bulk Analysis Functions
 def extract_base_code_tokens(base_code_path):
-    """Extract all tokens from base code for exclusion"""
+    """Extract all tokens from base code for exclusion - now supports multiple languages"""
     tokens = set()
+    code_extensions = ['.py', '.cpp', '.cc', '.cxx', '.c', '.h', '.java', '.js', '.jsx', '.ts', '.tsx']
+    
     for root, _, files in os.walk(base_code_path):
         for file in files:
-            if file.endswith('.py'):
-                with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    preprocessed = preprocess_code(content)
-                    # Tokenize the code
-                    tokens.update(set(re.findall(r'\b\w+\b', preprocessed)))
+            if any(file.lower().endswith(ext) for ext in code_extensions):
+                try:
+                    with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        language = detect_language(file)
+                        preprocessed = preprocess_code(content, language=language)
+                        # Tokenize the code
+                        tokens.update(set(re.findall(r'\b\w+\b', preprocessed)))
+                except Exception as e:
+                    print(f"Error processing base code file {file}: {str(e)}")
+                    continue
     return tokens
 
-def cluster_similar_files(results, threshold):
+def cluster_similar_files_enhanced(results, threshold, all_files):
     """
-    Cluster files based on similarity scores using single-linkage clustering
-    Returns a list of clusters and the detailed comparisons
+    Enhanced clustering that properly handles file grouping and standalone files
+    Returns structured clusters with IDs and standalone files
     """
     # Create a graph where nodes are files and edges represent similarity above threshold
     G = nx.Graph()
     
-    # Add all files as nodes and create edges for similar pairs
+    # Add all files as nodes first
+    for filename in all_files:
+        G.add_node(filename)
+    
+    # Create edges for similar pairs (using average similarity)
     for result in results:
-        if result['score'] >= threshold:
-            G.add_edge(result['file1'], result['file2'], weight=result['score'])
+        if result['average'] >= threshold:
+            G.add_edge(result['file1'], result['file2'], weight=result['average'])
     
     # Find connected components (clusters)
-    clusters = []
-    for component in connected_components(G):
-        if len(component) > 1:  # Only include clusters with at least 2 files
-            clusters.append(list(component))
+    raw_clusters = list(connected_components(G))
+    
+    # Separate multi-file clusters from standalone files
+    multi_file_clusters = [list(component) for component in raw_clusters if len(component) > 1]
+    standalone_files = [list(component)[0] for component in raw_clusters if len(component) == 1]
     
     # Sort clusters by size (largest first)
-    clusters.sort(key=len, reverse=True)
+    multi_file_clusters.sort(key=len, reverse=True)
     
-    return clusters, results
+    # Create structured cluster data
+    structured_clusters = []
+    
+    # Add multi-file clusters
+    for i, cluster_files in enumerate(multi_file_clusters, 1):
+        structured_clusters.append({
+            'cluster_id': i,
+            'files': sorted(cluster_files),  # Sort files alphabetically
+            'type': 'cluster'
+        })
+    
+    # Add standalone files as individual clusters
+    for filename in sorted(standalone_files):  # Sort alphabetically
+        structured_clusters.append({
+            'cluster_id': len(multi_file_clusters) + standalone_files.index(filename) + 1,
+            'files': [filename],
+            'type': 'standalone'
+        })
+    
+    return structured_clusters
 
 def generate_bulk_report(results, threshold):
     """Generate comprehensive PDF report for all comparisons"""
@@ -317,24 +490,199 @@ def generate_bulk_report(results, threshold):
     pdf.output(report_path)
     return report_path
 
-# PDF Report Class
+# Enhanced PDF Report Class
 class PDFReport(FPDF):
     def __init__(self):
         super().__init__()
         self.set_auto_page_break(auto=True, margin=15)
+        self.page_count = 0
     
     def header(self):
-        self.set_font('Helvetica', 'B', 12)
-        self.cell(0, 10, 'Code Similarity Report', 0, 1, 'C')
+        # Logo placeholder (optional)
+        # if os.path.exists('static/logo.png'):
+        #     self.image('static/logo.png', 10, 8, 25)
+        
+        self.set_font('Arial', 'B', 16)
+        self.cell(0, 15, 'Code Similarity Analysis Report', 0, 1, 'C')
+        self.set_font('Arial', 'I', 10)
+        self.cell(0, 5, 'Professional Code Comparison & Analysis', 0, 1, 'C')
         self.ln(5)
-
+        
+        # Add a line under header
+        self.set_draw_color(71, 160, 255)  # Blue line
+        self.line(10, self.get_y(), 200, self.get_y())
+        self.ln(8)
+    
+    def footer(self):
+        self.page_count += 1
+        self.set_y(-15)
+        self.set_font('Arial', 'I', 8)
+        
+        # Left footer - Generated by
+        self.cell(0, 10, 'Generated by Code Similarity Checker', 0, 0, 'L')
+        
+        # Right footer - Page number
+        self.cell(0, 10, f'Page {self.page_count}', 0, 0, 'R')
+    
+    def add_cover_page(self, file1_name, file2_name, timestamp, avg_similarity):
+        """Add professional cover page"""
+        self.add_page()
+        self.ln(30)
+        
+        # Title
+        self.set_font('Arial', 'B', 24)
+        self.cell(0, 15, 'CODE SIMILARITY', 0, 1, 'C')
+        self.cell(0, 15, 'ANALYSIS REPORT', 0, 1, 'C')
+        self.ln(20)
+        
+        # Files being compared
+        self.set_font('Arial', 'B', 14)
+        self.cell(0, 10, 'Files Compared:', 0, 1, 'C')
+        self.set_font('Arial', '', 12)
+        self.cell(0, 8, f'- {file1_name}', 0, 1, 'C')
+        self.cell(0, 8, f'- {file2_name}', 0, 1, 'C')
+        self.ln(15)
+        
+        # Overall similarity highlight
+        self.set_font('Arial', 'B', 18)
+        similarity_text = f'Overall Similarity: {avg_similarity:.1%}'
+        
+        # Color code based on similarity
+        if avg_similarity >= 0.7:
+            self.set_text_color(220, 53, 69)  # Red for high similarity
+        elif avg_similarity >= 0.4:
+            self.set_text_color(255, 193, 7)  # Orange for medium
+        else:
+            self.set_text_color(40, 167, 69)  # Green for low
+            
+        self.cell(0, 15, similarity_text, 0, 1, 'C')
+        self.set_text_color(0, 0, 0)  # Reset to black
+        
+        self.ln(20)
+        
+        # Report details
+        self.set_font('Arial', '', 11)
+        self.cell(0, 8, f'Report Generated: {timestamp.strftime("%B %d, %Y at %H:%M:%S")}', 0, 1, 'C')
+        self.cell(0, 8, f'Analysis Category: {get_similarity_category(avg_similarity)}', 0, 1, 'C')
+    
+    def add_summary_table(self, all_scores):
+        """Add algorithm results summary table"""
+        self.add_section_title("Algorithm Results Summary")
+        
+        # Table headers
+        self.set_font('Arial', 'B', 10)
+        self.set_fill_color(71, 160, 255)
+        self.set_text_color(255, 255, 255)
+        
+        self.cell(80, 8, 'Algorithm', 1, 0, 'C', True)
+        self.cell(30, 8, 'Score (%)', 1, 0, 'C', True)
+        self.cell(40, 8, 'Category', 1, 0, 'C', True)
+        self.cell(40, 8, 'Status', 1, 1, 'C', True)
+        
+        self.set_text_color(0, 0, 0)
+        self.set_font('Arial', '', 10)
+        
+        # Table rows
+        for algo in ['difflib', 'cosine', 'ast', 'jaccard']:
+            if algo in all_scores:
+                score = all_scores[algo]
+                category = get_similarity_category(score)
+                status = '! High' if score >= 0.7 else '* Normal' if score >= 0.4 else '* Low'
+                
+                # Alternate row colors
+                if algo in ['cosine', 'jaccard']:
+                    self.set_fill_color(248, 249, 250)
+                else:
+                    self.set_fill_color(255, 255, 255)
+                    
+                self.cell(80, 8, ALGORITHM_DESCRIPTIONS[algo]['name'], 1, 0, 'L', True)
+                self.cell(30, 8, f'{score:.1%}', 1, 0, 'C', True)
+                self.cell(40, 8, category, 1, 0, 'C', True)
+                self.cell(40, 8, status, 1, 1, 'C', True)
+        
+        # Average row (highlighted)
+        self.set_fill_color(255, 248, 220)
+        self.set_font('Arial', 'B', 10)
+        avg_score = all_scores.get('average', sum([all_scores[k] for k in all_scores if k != 'average']) / 4)
+        self.cell(80, 8, 'AVERAGE SIMILARITY', 1, 0, 'L', True)
+        self.cell(30, 8, f'{avg_score:.1%}', 1, 0, 'C', True)
+        self.cell(40, 8, get_similarity_category(avg_score), 1, 0, 'C', True)
+        self.cell(40, 8, '! High' if avg_score >= 0.7 else '* Normal', 1, 1, 'C', True)
+        
+        self.ln(5)
+    
+    def add_algorithm_details(self, all_scores):
+        """Add detailed algorithm analysis"""
+        self.add_section_title("Detailed Algorithm Analysis")
+        
+        for algo in ['difflib', 'cosine', 'ast', 'jaccard']:
+            if algo in all_scores:
+                score = all_scores[algo]
+                desc = ALGORITHM_DESCRIPTIONS[algo]
+                
+                # Algorithm name and score
+                self.set_font('Arial', 'B', 11)
+                self.cell(0, 8, f"{desc['name']}: {score:.1%}", 0, 1)
+                
+                # Description
+                self.set_font('Arial', '', 10)
+                self.multi_cell(0, 5, self._safe_text(desc['description']))
+                
+                # Score interpretation
+                category = get_similarity_category(score)
+                self.set_font('Arial', 'I', 9)
+                interpretation = f"Result: {category} similarity detected."
+                if score >= 0.8:
+                    interpretation += " Strong evidence of code similarity."
+                elif score >= 0.6:
+                    interpretation += " Moderate similarity detected."
+                elif score >= 0.4:
+                    interpretation += " Some similarities found."
+                else:
+                    interpretation += " Minimal similarity detected."
+                    
+                self.cell(0, 5, interpretation, 0, 1)
+                self.ln(3)
+    
+    def add_textual_analysis(self, all_scores):
+        """Add professional textual analysis"""
+        self.add_section_title("Professional Analysis & Interpretation")
+        
+        analysis = get_similarity_analysis(all_scores)
+        
+        self.set_font('Arial', '', 10)
+        self.multi_cell(0, 6, self._safe_text(analysis))
+        self.ln(5)
+        
+        # Conclusion section
+        avg_score = all_scores.get('average', sum([all_scores[k] for k in all_scores if k != 'average']) / 4)
+        
+        self.add_section_title("Conclusion")
+        
+        conclusion = f"Based on the comprehensive analysis using multiple algorithms, "
+        if avg_score >= 0.8:
+            conclusion += "the codes show VERY HIGH similarity (>=80%). This suggests significant code replication or shared implementation."
+        elif avg_score >= 0.6:
+            conclusion += "the codes show HIGH similarity (>=60%). There are substantial common elements between the implementations."
+        elif avg_score >= 0.4:
+            conclusion += "the codes show MODERATE similarity (>=40%). Some common patterns exist but with significant differences."
+        else:
+            conclusion += "the codes show LOW similarity (<40%). The implementations appear to be largely independent."
+        
+        self.set_font('Arial', '', 10)
+        self.multi_cell(0, 6, self._safe_text(conclusion))
+        self.ln(8)
+    
     def add_section_title(self, title):
-        self.set_font('Helvetica', 'B', 12)
+        self.ln(2)
+        self.set_font('Arial', 'B', 13)
+        self.set_text_color(71, 160, 255)
         self.cell(0, 10, title, 0, 1)
+        self.set_text_color(0, 0, 0)
         self.ln(2)
 
     def add_text_block(self, text):
-        self.set_font('Helvetica', '', 10)
+        self.set_font('Arial', '', 10)
         self.multi_cell(0, 5, self._safe_text(text))
         self.ln(3)
 
@@ -375,12 +723,43 @@ class PDFReport(FPDF):
     
     def _safe_text(self, text):
         """Convert Unicode characters to their closest ASCII equivalents"""
+        if not text:
+            return ""
+        
+        # Replace common Unicode characters with ASCII equivalents
+        replacements = {
+            '\u2022': '-',      # bullet point
+            '\u26a0': '!',      # warning sign
+            '\ufe0f': '',       # variation selector
+            '\u2713': '*',      # check mark
+            '\u2192': '->',     # right arrow
+            '\u2190': '<-',     # left arrow  
+            '\u2265': '>=',     # greater than or equal
+            '\u2264': '<=',     # less than or equal
+            '\u00a0': ' ',      # non-breaking space
+            '\u201c': '"',      # left double quotation
+            '\u201d': '"',      # right double quotation
+            '\u2018': "'",      # left single quotation
+            '\u2019': "'",      # right single quotation
+            '\u2014': '--',     # em dash
+            '\u2013': '-',      # en dash
+        }
+        
+        # Apply replacements
+        for unicode_char, ascii_char in replacements.items():
+            text = text.replace(unicode_char, ascii_char)
+        
         try:
+            # Try to encode as latin-1
             return text.encode('latin-1', 'replace').decode('latin-1')
         except:
-            normalized = unicodedata.normalize('NFKD', text)
-            ascii_text = normalized.encode('ascii', 'ignore').decode('ascii')
-            return ascii_text or "[non-ascii-content]"
+            # Fallback: normalize and convert to ASCII
+            try:
+                normalized = unicodedata.normalize('NFKD', text)
+                ascii_text = normalized.encode('ascii', 'ignore').decode('ascii')
+                return ascii_text or "[content-encoding-error]"
+            except:
+                return "[text-processing-error]"
 
 # Routes
 @app.route('/')
@@ -641,19 +1020,20 @@ def bulk_similarity():
                     file.save(file_path)
             base_code_tokens = extract_base_code_tokens(base_code_path)
         
-        # Get all code files
+        # Get all code files (support multiple languages)
+        code_extensions = ['.py', '.cpp', '.cc', '.cxx', '.c', '.h', '.java', '.js', '.jsx', '.ts', '.tsx']
         code_files = []
         for root, _, files in os.walk(submissions_path):
             for file in files:
-                if file.endswith('.py'):
+                if any(file.lower().endswith(ext) for ext in code_extensions):
                     code_files.append(os.path.join(root, file))
         
         # Check if we have at least 2 files to compare
         if len(code_files) < 2:
-            session['error_message'] = "Not enough Python files found for comparison. Please ensure your folder contains at least 2 Python files."
+            session['error_message'] = f"Not enough code files found for comparison. Please ensure your folder contains at least 2 code files with supported extensions: {', '.join(code_extensions)}"
             return redirect(url_for('dashboard'))
         
-        # Perform pairwise comparisons
+        # Perform comprehensive pairwise comparisons
         results = []
         total_comparisons = len(code_files) * (len(code_files) - 1) // 2
         completed = 0
@@ -662,59 +1042,97 @@ def bulk_similarity():
         session['total_comparisons'] = total_comparisons
         session['completed_comparisons'] = 0
         
+        # Get all filenames for clustering
+        all_filenames = [os.path.basename(f) for f in code_files]
+        
         for i in range(len(code_files)):
             for j in range(i + 1, len(code_files)):
                 file1 = code_files[i]
                 file2 = code_files[j]
+                filename1 = os.path.basename(file1)
+                filename2 = os.path.basename(file2)
                 
                 try:
                     with open(file1, 'r', encoding='utf-8') as f1, open(file2, 'r', encoding='utf-8') as f2:
                         content1 = f1.read()
                         content2 = f2.read()
                     
-                    # Preprocess code with base code exclusion
-                    preprocessed1 = preprocess_code(content1, base_code_tokens)
-                    preprocessed2 = preprocess_code(content2, base_code_tokens)
+                    # Detect languages
+                    lang1 = detect_language(filename1)
+                    lang2 = detect_language(filename2)
                     
-                    # Calculate similarity with base code exclusion
-                    similarity_score = similarity_ast_with_exclusion(
-                        preprocessed1, preprocessed2, base_code_tokens
+                    # Preprocess code with language awareness
+                    preprocessed1 = preprocess_code(content1, base_code_tokens, lang1)
+                    preprocessed2 = preprocess_code(content2, base_code_tokens, lang2)
+                    
+                    # Calculate comprehensive similarity scores
+                    similarity_results = calculate_comprehensive_similarity(
+                        preprocessed1, preprocessed2, lang1 if lang1 == lang2 else 'unknown'
                     )
                     
-                    # Store all results (not just those above threshold)
+                    # Store comprehensive results
                     results.append({
-                        'file1': os.path.basename(file1),
-                        'file2': os.path.basename(file2),
-                        'score': similarity_score,
+                        'file1': filename1,
+                        'file2': filename2,
+                        'difflib': similarity_results['difflib'],
+                        'tfidf': similarity_results['tfidf'],
+                        'ast': similarity_results['ast'],
+                        'jaccard': similarity_results['jaccard'],
+                        'average': similarity_results['average'],
                         'content1': content1,
                         'content2': content2,
                         'preprocessed1': preprocessed1,
-                        'preprocessed2': preprocessed2
+                        'preprocessed2': preprocessed2,
+                        'language1': lang1,
+                        'language2': lang2
                     })
                 except Exception as e:
+                    print(f"Error processing {filename1} vs {filename2}: {str(e)}")
                     # Skip files that can't be read
                     continue
                 
                 completed += 1
                 session['completed_comparisons'] = completed
         
-        # Cluster the results
-        clusters, detailed_results = cluster_similar_files(results, threshold)
+        # Sort results by average similarity (descending)
+        results.sort(key=lambda x: x['average'], reverse=True)
         
-        # Store the analysis in Firestore
+        # Enhanced clustering with structured data
+        clusters = cluster_similar_files_enhanced(results, threshold, all_filenames)
         
+        # Prepare clean report data for Firestore
         timestamp = datetime.now().isoformat()
+        
+        # Clean comparisons data (remove large content fields for storage)
+        clean_comparisons = []
+        for result in results:
+            clean_comparisons.append({
+                'file1': result['file1'],
+                'file2': result['file2'],
+                'difflib': round(result['difflib'], 4),
+                'tfidf': round(result['tfidf'], 4),
+                'ast': round(result['ast'], 4),
+                'jaccard': round(result['jaccard'], 4),
+                'average': round(result['average'], 4),
+                'language1': result['language1'],
+                'language2': result['language2']
+            })
+        
         report_data = {
             'user': session['user'],
             'timestamp': timestamp,
             'threshold': threshold,
-            'clusters': fix_nested_arrays(clusters),
-            'comparisons': fix_nested_arrays(detailed_results),
-            'total_files': len(code_files)
+            'clusters': clusters,  # Already clean structured data
+            'comparisons': clean_comparisons,  # Clean comparison data
+            'total_files': len(code_files),
+            'file_extensions': list(set([os.path.splitext(f.lower())[1] for f in all_filenames])),
+            'languages_detected': list(set([detect_language(f) for f in all_filenames]))
         }
-
-        print("REPORT DATA (Firestore safe):", report_data)
-
+        
+        print("ENHANCED REPORT DATA:", report_data)
+        
+        # Store detailed results in session for the report view (with full content)
+        session['detailed_results'] = results
         
         # Add to Firestore and get the document ID
         doc_ref = db.collection('bulk_analyses').add(report_data)
@@ -753,7 +1171,7 @@ def report_detail(report_id, file1, file2):
     if not report_data or report_data['user'] != session['user']:
         return render_template('error.html', error_message="Report not found or access denied.")
     
-    # Find the specific comparison
+    # Find the specific comparison in the clean data
     comparison = None
     for comp in report_data['comparisons']:
         if (comp['file1'] == file1 and comp['file2'] == file2) or \
@@ -764,26 +1182,57 @@ def report_detail(report_id, file1, file2):
     if not comparison:
         return render_template('error.html', error_message="Comparison not found.")
     
-    # Generate HTML diff for the comparison
-    html_diff = HtmlDiff().make_table(
-        comparison['preprocessed1'].splitlines(), 
-        comparison['preprocessed2'].splitlines(), 
-        comparison['file1'], 
-        comparison['file2'], 
-        context=True, 
-        numlines=3
-    )
+    # Try to get detailed results from session (has full content)
+    detailed_results = session.get('detailed_results', [])
+    detailed_comparison = None
+    
+    for detail in detailed_results:
+        if (detail['file1'] == file1 and detail['file2'] == file2) or \
+           (detail['file1'] == file2 and detail['file2'] == file1):
+            detailed_comparison = detail
+            break
+    
+    # If we have detailed results, use them for diff generation
+    if detailed_comparison:
+        html_diff = HtmlDiff().make_table(
+            detailed_comparison['preprocessed1'].splitlines(), 
+            detailed_comparison['preprocessed2'].splitlines(), 
+            detailed_comparison['file1'], 
+            detailed_comparison['file2'], 
+            context=True, 
+            numlines=3
+        )
+        original_text1 = detailed_comparison['content1']
+        original_text2 = detailed_comparison['content2']
+        preprocessed_text1 = detailed_comparison['preprocessed1']
+        preprocessed_text2 = detailed_comparison['preprocessed2']
+    else:
+        # Fallback if no detailed results available
+        html_diff = "<p>Detailed comparison not available. Please re-run the analysis.</p>"
+        original_text1 = "Content not available"
+        original_text2 = "Content not available"
+        preprocessed_text1 = "Content not available"
+        preprocessed_text2 = "Content not available"
+    
+    # Enhanced scores data
+    all_scores = {
+        'difflib': comparison['difflib'],
+        'tfidf': comparison['tfidf'],
+        'ast': comparison['ast'],
+        'jaccard': comparison['jaccard'],
+        'average': comparison['average']
+    }
     
     return render_template('results.html', 
-                         method='AST', 
-                         score=comparison['score'],
-                         original_text1=comparison['content1'],
-                         original_text2=comparison['content2'],
-                         preprocessed_text1=comparison['preprocessed1'],
-                         preprocessed_text2=comparison['preprocessed2'],
+                         method='COMPREHENSIVE', 
+                         score=comparison['average'],
+                         original_text1=original_text1,
+                         original_text2=original_text2,
+                         preprocessed_text1=preprocessed_text1,
+                         preprocessed_text2=preprocessed_text2,
                          html_diff=html_diff, 
-                         threshold_alert=comparison['score'] >= report_data['threshold'],
-                         all_scores={'ast': comparison['score']})
+                         threshold_alert=comparison['average'] >= report_data['threshold'],
+                         all_scores=all_scores)
 
 @app.route('/similarity', methods=['POST'])
 def compare():
@@ -836,59 +1285,92 @@ def compare():
     threshold_alert = score >= THRESHOLD
 
     if generate_report:
-        report_path = os.path.join(app.config['UPLOAD_FOLDER'], f"report_{uuid.uuid4().hex}.pdf")
+        report_path = os.path.join(app.config['UPLOAD_FOLDER'], f"enhanced_report_{uuid.uuid4().hex}.pdf")
         chart_path = os.path.join(app.config['UPLOAD_FOLDER'], f"chart_{uuid.uuid4().hex}.png")
         bar_chart_path = os.path.join(app.config['UPLOAD_FOLDER'], f"barchart_{uuid.uuid4().hex}.png")
         
+        # Generate visualizations
         generate_similarity_chart(score, chart_path)
         generate_all_methods_barchart(all_scores, bar_chart_path)
         
+        # Calculate average similarity for comprehensive analysis
+        avg_similarity = sum(all_scores.values()) / len(all_scores)
+        all_scores['average'] = avg_similarity
+        
+        # Create enhanced PDF report
         pdf = PDFReport()
+        timestamp = datetime.now()
+        
+        # 1. Cover Page
+        pdf.add_cover_page(file1.filename, file2.filename, timestamp, avg_similarity)
+        
+        # 2. Summary Page
         pdf.add_page()
+        pdf.add_section_title("Executive Summary")
         
-        pdf.set_font('Arial', 'B', 16)
-        pdf.cell(0, 10, 'Code Similarity Analysis Report', 0, 1, 'C')
-        pdf.ln(10)
-        
-        pdf.add_section_title("Analysis Summary")
-        pdf.add_text_block(f"Comparison between: {file1.filename} and {file2.filename}")
-        pdf.add_text_block(f"Selected Method: {method.upper()}")
-        pdf.add_text_block(f"Similarity Score: {score:.2%}")
-        pdf.add_text_block(f"Plagiarism Threshold ({THRESHOLD:.0%}) Exceeded: {'Yes' if threshold_alert else 'No'}")
+        # Project info
+        pdf.set_font('Arial', '', 11)
+        pdf.cell(0, 6, f"Project: Code Similarity Analysis", 0, 1)
+        pdf.cell(0, 6, f"Date/Time: {timestamp.strftime('%B %d, %Y at %H:%M:%S')}", 0, 1)
+        pdf.cell(0, 6, f"Primary Method: {method.upper()}", 0, 1)
+        pdf.cell(0, 6, f"Threshold: {THRESHOLD:.0%}", 0, 1)
         pdf.ln(5)
         
+        # Algorithm Results Table
+        pdf.add_summary_table(all_scores)
+        
+        # 3. Visualizations
         pdf.add_section_title("Similarity Visualizations")
+        pdf.add_text_block("The following charts provide visual representation of the similarity analysis:")
+        
+        # Individual algorithm chart (pie chart)
+        pdf.add_text_block(f"Selected Algorithm ({method.upper()}) Result:")
         pdf.add_image(chart_path, w=80)
+        pdf.ln(5)
+        
+        # All methods comparison (bar chart)
+        pdf.add_text_block("Comprehensive Multi-Algorithm Comparison:")
         pdf.add_image(bar_chart_path, w=180)
+        pdf.ln(8)
+        
+        # 4. Detailed Algorithm Analysis
+        pdf.add_algorithm_details(all_scores)
+        
+        # 5. Professional Textual Analysis
+        pdf.add_textual_analysis(all_scores)
+        
+        # 6. Technical Details (New Page)
+        pdf.add_page()
+        pdf.add_section_title("Technical Implementation Details")
+        
+        pdf.add_text_block("Preprocessing Pipeline:")
+        pdf.add_text_block("1. Comment Removal: All single-line and multi-line comments removed")
+        pdf.add_text_block("2. Identifier Normalization: Variables, functions, and classes renamed systematically")
+        pdf.add_text_block("3. Whitespace Standardization: Consistent formatting applied")
+        pdf.add_text_block("4. Language-Specific Processing: Custom handling for different programming languages")
         pdf.ln(5)
         
-        pdf.add_section_title("Preprocessing Details")
-        pdf.add_text_block("Before comparison, the following preprocessing steps were applied:")
-        pdf.add_text_block("1. All comments were removed")
-        pdf.add_text_block("2. All identifiers were normalized (variables → vN, functions → fN, etc.)")
-        pdf.ln(3)
+        # 7. Code Samples (Limited)
+        pdf.add_section_title("Code Sample Analysis")
         
-        pdf.add_section_title("Original vs Preprocessed Code")
-        pdf.add_text_block(f"Original {file1.filename}:")
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(0, 6, f"File 1: {file1.filename}", 0, 1)
         pdf.set_font('Courier', '', 8)
-        pdf.multi_cell(0, 5, original_text1[:1000] + ("..." if len(original_text1) > 1000 else ""))
+        pdf.multi_cell(0, 4, original_text1[:800] + ("\n... [truncated for brevity]" if len(original_text1) > 800 else ""))
         pdf.ln(3)
         
-        pdf.add_text_block(f"Preprocessed {file1.filename}:")
-        pdf.multi_cell(0, 5, preprocessed_text1[:1000] + ("..." if len(preprocessed_text1) > 1000 else ""))
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(0, 6, f"File 2: {file2.filename}", 0, 1)
+        pdf.set_font('Courier', '', 8)
+        pdf.multi_cell(0, 4, original_text2[:800] + ("\n... [truncated for brevity]" if len(original_text2) > 800 else ""))
         pdf.ln(5)
         
-        pdf.add_text_block(f"Original {file2.filename}:")
-        pdf.multi_cell(0, 5, original_text2[:1000] + ("..." if len(original_text2) > 1000 else ""))
-        pdf.ln(3)
+        # 8. Differences Analysis
+        if avg_similarity >= 0.4:  # Only show diff for moderate+ similarity
+            pdf.add_section_title("Key Differences Identified")
+            pdf.add_diff_block(preprocessed_text1, preprocessed_text2)
         
-        pdf.add_text_block(f"Preprocessed {file2.filename}:")
-        pdf.multi_cell(0, 5, preprocessed_text2[:1000] + ("..." if len(preprocessed_text2) > 1000 else ""))
-        pdf.ln(5)
-        
-        pdf.add_section_title("Detailed Differences (Preprocessed Code)")
-        pdf.add_diff_block(preprocessed_text1, preprocessed_text2)
-        
+        # Generate and return the enhanced PDF
         pdf.output(report_path)
         return send_file(report_path)
 
