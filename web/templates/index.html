@@ -205,6 +205,33 @@
             background-color: rgba(255, 255, 255, 0.1);
             margin: 5px 0;
         }
+
+        /* Tabs for switching between single and bulk comparison */
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        }
+
+        .tab.active {
+            opacity: 1;
+            border-bottom: 2px solid #47a0ff;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -230,40 +257,76 @@
 
         <h2>Code Similarity Checker</h2>
 
-        <form action="/similarity" method="POST" enctype="multipart/form-data">
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="file1">Upload File 1</label>
-                    <label for="file1" class="file-label">Choose File</label>
-                    <input type="file" id="file1" name="file1" required>
-                    <div id="file1-name" class="file-name">No file chosen</div>
+        <!-- Tabs for switching between single and bulk comparison -->
+        <div class="tabs">
+            <div class="tab active" data-tab="single">Single Comparison</div>
+            <div class="tab" data-tab="bulk">Bulk Analysis</div>
+        </div>
+
+        <!-- Single File Comparison Form -->
+        <div class="tab-content active" id="single-comparison">
+            <form action="/similarity" method="POST" enctype="multipart/form-data">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="file1">Upload File 1</label>
+                        <label for="file1" class="file-label">Choose File</label>
+                        <input type="file" id="file1" name="file1" required>
+                        <div id="file1-name" class="file-name">No file chosen</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="file2">Upload File 2</label>
+                        <label for="file2" class="file-label">Choose File</label>
+                        <input type="file" id="file2" name="file2" required>
+                        <div id="file2-name" class="file-name">No file chosen</div>
+                    </div>
                 </div>
 
                 <div class="form-group">
-                    <label for="file2">Upload File 2</label>
-                    <label for="file2" class="file-label">Choose File</label>
-                    <input type="file" id="file2" name="file2" required>
-                    <div id="file2-name" class="file-name">No file chosen</div>
+                    <label for="method">Choose Similarity Method</label>
+                    <select name="method" id="method">
+                        <option value="difflib">Difflib (default)</option>
+                        <option value="cosine">Cosine Similarity</option>
+                        <option value="ast">AST Tree</option>
+                        <option value="jaccard">Jaccard Similarity</option>
+                    </select>
                 </div>
-            </div>
 
-            <div class="form-group">
-                <label for="method">Choose Similarity Method</label>
-                <select name="method" id="method">
-                    <option value="difflib">Difflib (default)</option>
-                    <option value="cosine">Cosine Similarity</option>
-                    <option value="ast">AST Tree</option>
-                    <option value="jaccard">Jaccard Similarity</option>
-                </select>
-            </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" name="report" id="report">
+                    <label for="report">Generate PDF Report</label>
+                </div>
 
-            <div class="checkbox-group">
-                <input type="checkbox" name="report" id="report">
-                <label for="report">Generate PDF Report</label>
-            </div>
+                <button type="submit">Compare Files</button>
+            </form>
+        </div>
 
-            <button type="submit">Compare Files</button>
-        </form>
+        <!-- Bulk Analysis Form -->
+        <div class="tab-content" id="bulk-analysis">
+            <form method="POST" enctype="multipart/form-data" action="/bulk_similarity">
+                <div class="form-group">
+                    <label for="submissions_folder">Submissions Folder:</label>
+                    <label for="submissions_folder" class="file-label">Choose Folder</label>
+                    <input type="file" id="submissions_folder" name="submissions_folder" webkitdirectory directory required>
+                    <div id="submissions-folder-name" class="file-name">No folder chosen</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="base_code_folder">Base Code Folder (optional):</label>
+                    <label for="base_code_folder" class="file-label">Choose Folder</label>
+                    <input type="file" id="base_code_folder" name="base_code_folder" webkitdirectory directory>
+                    <div id="base-code-folder-name" class="file-name">No folder chosen</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="threshold">Similarity Threshold (e.g., 0.7 for 70%):</label>
+                    <input type="number" id="threshold" name="threshold" min="0" max="1" step="0.01" value="0.7" required 
+                           style="width: 96%; padding: 12px; background-color: rgba(45, 55, 75, 0.6); border: none; border-radius: 4px; color: white; font-size: 16px;">
+                </div>
+                <br>
+                <button type="submit">Analyze Folder</button>
+            </form>
+        </div>
     </div>
 
     <script>
@@ -272,12 +335,22 @@
             const nameDisplay = document.getElementById(nameId);
 
             input.addEventListener('change', function () {
-                nameDisplay.textContent = this.files.length ? this.files[0].name : 'No file chosen';
+                if (this.files.length > 0) {
+                    if (this.hasAttribute('webkitdirectory') || this.hasAttribute('directory')) {
+                        nameDisplay.textContent = `${this.files.length} files selected`;
+                    } else {
+                        nameDisplay.textContent = this.files[0].name;
+                    }
+                } else {
+                    nameDisplay.textContent = 'No file chosen';
+                }
             });
         }
 
         setupFileInput('file1', 'file1-name');
         setupFileInput('file2', 'file2-name');
+        setupFileInput('submissions_folder', 'submissions-folder-name');
+        setupFileInput('base_code_folder', 'base-code-folder-name');
 
         // Profile dropdown functionality
         const profileBtn = document.getElementById('profileBtn');
@@ -291,6 +364,24 @@
         // Close dropdown when clicking outside
         document.addEventListener('click', function() {
             dropdownMenu.classList.remove('show');
+        });
+
+        // Tab functionality
+        const tabs = document.querySelectorAll('.tab');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabId = tab.getAttribute('data-tab');
+                
+                // Update active tab
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // Show correct content
+                tabContents.forEach(content => content.classList.remove('active'));
+                document.getElementById(`${tabId}-${tabId === 'single' ? 'comparison' : 'analysis'}`).classList.add('active');
+            });
         });
     </script>
 </body>
